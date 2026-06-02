@@ -1,0 +1,24 @@
+# Mirror of the portal metadata (fill in before submitting).
+team_name: "<<TEAM NAME>>"
+primary_contact:
+  name: "Meena"            # <<confirm>>
+  email: "<<EMAIL>>"
+  phone: "<<PHONE>>"
+github_repository_url: "https://github.com/<<USERNAME>>/redrob-ranker"  # set repo PUBLIC
+sandbox_demo_link: "<<HuggingFace Space / Streamlit Cloud / Colab / docker run link>>"
+ai_tools_declared: ["Claude", "Cursor"]   # honest declaration; edit to match reality
+compute_environment_summary: "16 GB RAM, CPU-only, Python 3.11"
+team_members:
+  - {name: "Meena", email: "<<EMAIL>>"}
+methodology_summary: >
+  Hybrid CPU-only ranker. The fixed JD is parsed into a structured requirement model.
+  Each candidate is scored from (a) lexical relevance (local hashing TF cosine to a JD
+  query), (b) production IR/ML evidence mined from career-history text (not the skills
+  list), (c) experience-band fit, and (d) product-company exposure. Rule gates handle the
+  dataset traps: honeypots are floored via internal-consistency checks; keyword-stuffers,
+  non-engineering roles, services-only and research-only careers, CV/speech-only and
+  LangChain-wrapper profiles, and title-chasers are penalised. A behavioural-availability
+  multiplier (recency, recruiter-response, open-to-work, interview-completion) and a
+  location factor finish the score. Reasoning is generated deterministically from each
+  candidate's real fields (no LLM at ranking time -> no hallucination). Ranking step runs
+  in ~75 s on 100k candidates, ~1 GB RAM, CPU-only, no network.
