@@ -21,6 +21,7 @@ CAP = 5000  # processing cap so the demo always runs inside Streamlit's limits
 # ============================ synthetic discovery pool ============================
 _FIRST = ["Aarav","Diya","Kabir","Ira","Vivaan","Anaya","Reyansh","Myra","Arjun","Sara",
           "Dev","Tara","Rohan","Nisha","Aditya","Meera","Karan","Zoya","Veer","Ishan"]
+_LAST = ["Vora","Shah","Iyer","Nair","Rao","Mehta","Gupta","Reddy","Bose","Khan","Das","Menon","Patel","Joshi"]
 _PROD = ["ShopWave","Streamly","KartHub","FinML Labs","Nexa","Bolt AI","Loop","Vyom","Terra","Glimpse"]
 _SVC  = ["Infosys","TCS","Wipro","Cognizant","Capgemini","Accenture"]
 _CITY = ["Pune","Bengaluru","Hyderabad","Noida","Gurugram","Mumbai","Delhi NCR","Chennai"]
@@ -112,10 +113,15 @@ _ARCH = [(_strong_ml,5),(_sw_recsys,4),(_ml_mid,7),(_data_sci,9),(_sw_generic,22
 def generate_pool(n=600, seed=42):
     rng = random.Random(seed)
     fns = [f for f,w in _ARCH for _ in range(w)]   # weighted bag
-    return [rng.choice(fns)(i, rng) for i in range(n)]
+    pool = []
+    for i in range(n):
+        r = rng.choice(fns)(i, rng)
+        r["profile"]["anonymized_name"] = rng.choice(_FIRST) + " " + rng.choice(_LAST)
+        pool.append(r)
+    return pool
 
 # ============================ CSV upload support ============================
-CSV_COLUMNS = ["candidate_id","current_title","years_of_experience","summary","skills","location",
+CSV_COLUMNS = ["candidate_id","name","current_title","years_of_experience","summary","skills","location",
                "country","company","company_size","last_active_date","recruiter_response_rate",
                "interview_completion_rate","open_to_work","willing_to_relocate","notice_period_days","github_activity_score"]
 def _num(v,d):
@@ -127,7 +133,8 @@ def csv_row_to_record(row,i):
     g=lambda k,d="":(row.get(k) or d); yoe=_num(g("years_of_experience"),0.0); summary=g("summary")
     skills=[{"name":s.strip(),"proficiency":"advanced","duration_months":int(yoe*12)} for s in g("skills").split(",") if s.strip()]
     return {"candidate_id":g("candidate_id",f"ROW_{i+1}"),
-        "profile":{"current_title":g("current_title"),"years_of_experience":yoe,"headline":g("current_title"),
+        "profile":{"anonymized_name":g("name",g("candidate_id",f"ROW_{i+1}")),"current_title":g("current_title"),
+                   "years_of_experience":yoe,"headline":g("current_title"),
                    "summary":summary,"current_company":g("company"),"location":g("location"),"country":g("country","India")},
         "career_history":[{"title":g("current_title"),"company":g("company"),"company_size":g("company_size","51-200"),
                    "description":summary,"duration_months":int(yoe*12),"start_date":"2020-01-01","end_date":None,"is_current":True}],
@@ -151,9 +158,9 @@ def parse_upload(name,data):
                 try: recs.append(json.loads(l))
                 except Exception: pass
     return recs,total
-TEMPLATE=("candidate_id,current_title,years_of_experience,summary,skills,location,country,recruiter_response_rate,open_to_work,willing_to_relocate\n"
- "C1,Senior ML Engineer,7,Built production retrieval and ranking and a recommendation engine with embeddings and learning-to-rank at a product company,\"Python,Information Retrieval,Recommender Systems\",Pune,India,0.85,true,true\n"
- "C2,HR Manager,4,Handled recruitment payroll and engagement,\"Machine Learning,Deep Learning,NLP,LLM\",Delhi,India,0.6,true,true\n")
+TEMPLATE=("candidate_id,name,current_title,years_of_experience,summary,skills,location,country,recruiter_response_rate,open_to_work,willing_to_relocate\n"
+ "C1,Asha Rao,Senior ML Engineer,7,Built production retrieval and ranking and a recommendation engine with embeddings and learning-to-rank at a product company,\"Python,Information Retrieval,Recommender Systems\",Pune,India,0.85,true,true\n"
+ "C2,Ravi Sen,HR Manager,4,Handled recruitment payroll and engagement,\"Machine Learning,Deep Learning,NLP,LLM\",Delhi,India,0.6,true,true\n")
 
 # ============================ ranking for display ============================
 def rank_for_display(records, topk):
@@ -164,11 +171,13 @@ def rank_for_display(records, topk):
     top=order[:min(topk,len(feats))]; raw=np.array([scores[i] for i in top],float)
     finite=raw[raw>-1e5]; lo=finite.min() if len(finite) else raw.min(); hi=raw.max()
     norm=np.clip((raw-lo)/(hi-lo) if hi>lo else np.ones_like(raw),0,1); out=np.round(0.40+0.59*norm,4)
-    return [{"rank":pos,"candidate_id":feats[i]["cid"],"title":records[i]["profile"]["current_title"],
+    return [{"rank":pos,"candidate_id":feats[i]["cid"],
+             "name":records[i]["profile"].get("anonymized_name") or records[i]["profile"].get("name") or "—",
+             "title":records[i]["profile"].get("current_title",""),
              "score":f"{out[pos-1]:.4f}","reasoning":R.reasoning(feats[i])} for pos,i in enumerate(top,1)]
 def to_csv(rows):
-    buf=io.StringIO(); w=csv.writer(buf); w.writerow(["candidate_id","rank","score","reasoning"])
-    for r in rows: w.writerow([r["candidate_id"],r["rank"],r["score"],r["reasoning"]])
+    buf=io.StringIO(); w=csv.writer(buf); w.writerow(["rank","candidate_id","name","title","score","reasoning"])
+    for r in rows: w.writerow([r["rank"],r["candidate_id"],r["name"],r["title"],r["score"],r["reasoning"]])
     return buf.getvalue()
 
 # ============================ UI ============================
