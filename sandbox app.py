@@ -70,11 +70,16 @@ def _data_sci(i,rng):
         [_sk("SQL","expert",yoe*12),_sk("Python","advanced",40),_sk("Machine Learning","intermediate",20)],
         rng.choice(_CITY),"India",_sig(rng,resp=round(rng.uniform(0.4,0.7),2),gh=rng.randint(0,30)))
 def _sw_generic(i,rng):
-    t=rng.choice(["Software Engineer","Full Stack Developer","Backend Engineer","Frontend Engineer","DevOps Engineer"])
+    role,d,sk = rng.choice([
+      ("Frontend Engineer","Built responsive web UIs with React, TypeScript and modern CSS; component design, accessibility and frontend performance.",[("JavaScript","advanced"),("React","advanced")]),
+      ("Backend Engineer","Built backend services and REST APIs with databases and caching; microservices and cloud deployment.",[("Java","advanced"),("Python","intermediate")]),
+      ("Full Stack Developer","Built full-stack web applications — React frontend with a Node and Java backend, APIs and databases.",[("JavaScript","advanced"),("Node.js","advanced")]),
+      ("DevOps Engineer","Owned CI/CD, Kubernetes, Terraform and cloud infrastructure; reliability, monitoring and observability.",[("Kubernetes","advanced"),("AWS","advanced")]),
+      ("Data Engineer","Built data pipelines with Spark and Airflow; SQL warehouses and ETL at scale.",[("Spark","advanced"),("SQL","expert")]),
+    ])
     yoe=rng.randint(2,10)
-    d="Built and maintained web services and APIs; microservices, CI/CD and cloud deployments. No ML work."
-    return _rec(f"CAND_{i:05d}",t,yoe,d,[_job(t,rng.choice(_PROD),"201-500",d,yoe*12)],
-        [_sk("Java","advanced",yoe*12),_sk("Python","intermediate",24)],rng.choice(_CITY),"India",_sig(rng,gh=rng.randint(0,40)))
+    return _rec(f"CAND_{i:05d}",role,yoe,d,[_job(role,rng.choice(_PROD),"201-500",d,yoe*12)],
+        [_sk(n,p,yoe*12) for n,p in sk],rng.choice(_CITY),"India",_sig(rng,gh=rng.randint(0,40)))
 def _non_eng(i,rng):
     t=rng.choice(["HR Manager","Marketing Manager","Sales Executive","Mechanical Engineer","Accountant",
                   "Operations Manager","Business Analyst","Civil Engineer","Content Writer","Project Manager"])
@@ -163,14 +168,50 @@ TEMPLATE=("candidate_id,name,current_title,years_of_experience,summary,skills,lo
  "C2,Ravi Sen,HR Manager,4,Handled recruitment payroll and engagement,\"Machine Learning,Deep Learning,NLP,LLM\",Delhi,India,0.6,true,true\n")
 
 # ============================ ranking for display ============================
-def rank_for_display(records, topk):
-    feats=[R.extract(c) for c in records]
-    hv=R.make_vectorizer(); X=hv.transform(f["blob"] for f in feats); qv=hv.transform([R.JD_QUERY])
-    cos=np.asarray(X.dot(qv.T).todense()).ravel(); scores=R.compute_scores(feats,cos)
-    order=sorted(range(len(feats)),key=lambda i:(-scores[i],-feats[i]["evidence_score"],-cos[i],feats[i]["cid"]))
-    top=order[:min(topk,len(feats))]; raw=np.array([scores[i] for i in top],float)
-    finite=raw[raw>-1e5]; lo=finite.min() if len(finite) else raw.min(); hi=raw.max()
-    norm=np.clip((raw-lo)/(hi-lo) if hi>lo else np.ones_like(raw),0,1); out=np.round(0.40+0.59*norm,4)
+DEFAULT_JD = ("Senior AI Engineer — Redrob (founding team). Build production retrieval and ranking systems: "
+  "embeddings, vector search, hybrid search, recommendation and relevance at scale. Strong Python and software "
+  "engineering. Ranking evaluation (NDCG, MRR, MAP) and A/B testing. 5-9 years, ideally 6-8, with 4-5 in applied "
+  "ML at product companies, having shipped end-to-end search/recsys to real users. NLP/IR focus; LLM fine-tuning, "
+  "learning-to-rank and distributed systems a plus. In or willing to relocate to Noida/Pune. Not a fit: research-only "
+  "without production, LangChain-wrapper-only, services-firm-only careers, frequent title-chasing, or "
+  "computer-vision/speech-only without NLP/IR.")
+
+def fetch_url_text(url):
+    import urllib.request, re as _re
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    html = urllib.request.urlopen(req, timeout=15).read().decode("utf-8", "ignore")
+    html = _re.sub(r"(?is)<(script|style)\b.*?>.*?</\1>", " ", html)
+    text = _re.sub(r"(?s)<[^>]+>", " ", html)
+    return _re.sub(r"\s+", " ", text).strip()[:6000]
+
+_AI_TERMS = ["machine learning","ml engineer","ai engineer","data scien","nlp","retrieval","ranking",
+             "recsys","recommend","embedding","llm","search relevance","information retrieval"]
+def _is_ai_jd(jd):
+    j = (jd or "").lower(); return sum(t in j for t in _AI_TERMS) >= 2
+
+def _generic_scores(feats, cos):
+    # JD-driven scoring for non-AI JDs: relevance + general integrity/seniority signals, no AI-specific bias
+    out = []
+    for f, ci in zip(feats, cos):
+        s = 9.0*ci + 2.2*f["exp_fit"] + (1.0 if f["big_product"] else 0.0) + (0.6 if f["has_python"] else 0.0) + f["nice"]
+        if f["keyword_stuffer"]: s -= 3.0
+        if f["title_chaser"]:    s -= 1.5
+        if f["notice"] > 60:     s -= 0.6
+        s = s * f["avail"] * f["location_mult"]
+        if f["honeypot"]:        s = -1e6
+        out.append(s)
+    return np.array(out, float)
+
+def rank_for_display(records, topk, jd_text=None):
+    feats = [R.extract(c) for c in records]
+    query = (jd_text or "").strip() or R.JD_QUERY
+    hv = R.make_vectorizer(); X = hv.transform(f["blob"] for f in feats); qv = hv.transform([query])
+    cos = np.asarray(X.dot(qv.T).todense()).ravel()
+    scores = R.compute_scores(feats, cos) if _is_ai_jd(query) else _generic_scores(feats, cos)
+    order = sorted(range(len(feats)), key=lambda i: (-scores[i], -feats[i]["evidence_score"], -cos[i], feats[i]["cid"]))
+    top = order[:min(topk, len(feats))]; raw = np.array([scores[i] for i in top], float)
+    finite = raw[raw > -1e5]; lo = finite.min() if len(finite) else raw.min(); hi = raw.max()
+    norm = np.clip((raw - lo)/(hi - lo) if hi > lo else np.ones_like(raw), 0, 1); out = np.round(0.40 + 0.59*norm, 4)
     return [{"rank":pos,"candidate_id":feats[i]["cid"],
              "name":records[i]["profile"].get("anonymized_name") or records[i]["profile"].get("name") or "—",
              "title":records[i]["profile"].get("current_title",""),
@@ -183,8 +224,30 @@ def to_csv(rows):
 # ============================ UI ============================
 st.set_page_config(page_title="Redrob Ranker — Sandbox", layout="wide")
 st.title("Redrob Ranker — Sandbox")
-st.caption("Ranks candidates against the Senior AI Engineer JD using the exact rank.py pipeline — CPU-only, no network.")
+st.caption("Paste, upload, or link any job description, then rank candidates against it. CPU-only, no network. "
+           "The JD drives the relevance match; integrity checks (honeypots, keyword-stuffing), availability and "
+           "experience are general — for AI/engineering JDs the full role-fit model applies.")
 
+st.subheader("1 · Job description")
+jd_src = st.radio("JD source", ["Challenge JD", "Paste", "Upload .txt/.md", "From URL"], horizontal=True)
+jd_text = DEFAULT_JD
+if jd_src == "Paste":
+    jd_text = st.text_area("Paste the JD", value=DEFAULT_JD, height=150)
+elif jd_src == "Upload .txt/.md":
+    jf = st.file_uploader("JD file (.txt or .md)", type=["txt", "md"], key="jdfile")
+    if jf is not None: jd_text = jf.getvalue().decode("utf-8", "ignore")
+    st.caption("For PDF/DOCX, paste the text via the Paste option.")
+elif jd_src == "From URL":
+    u = st.text_input("Public JD URL")
+    if u:
+        try:
+            jd_text = fetch_url_text(u); st.success(f"Fetched {len(jd_text)} characters from the page.")
+        except Exception as e:
+            st.warning(f"Couldn't fetch that URL ({e}); using the challenge JD."); jd_text = DEFAULT_JD
+with st.expander("JD in use"):
+    st.write((jd_text or "")[:1500] + ("…" if len(jd_text or "") > 1500 else ""))
+
+st.subheader("2 · Candidates")
 mode = st.radio("Input", ["Demo pool (synthetic)", "Upload CSV / JSONL"], horizontal=True)
 records, total = None, 0
 
@@ -215,6 +278,6 @@ if records:
     n=len(records); maxk=min(100,n)
     topk = st.slider("How many to rank", 1, maxk, min(10,maxk)) if maxk>1 else maxk
     if st.button("Rank candidates", type="primary"):
-        rows = rank_for_display(records, topk)
+        rows = rank_for_display(records, topk, jd_text)
         st.dataframe(rows, use_container_width=True, hide_index=True)
         st.download_button("Download ranked CSV", to_csv(rows), "ranked.csv", "text/csv")
