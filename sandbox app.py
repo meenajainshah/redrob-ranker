@@ -167,7 +167,9 @@ else:
     st.write(f"Built-in sample: **{len(SAMPLE)}** candidates (includes a keyword-stuffer and a honeypot to show the trap handling).")
 
 if records:
-    topk = st.slider("How many to rank", 3, min(100, len(records)), min(10, len(records)))
+    n = len(records)
+    maxk = min(100, n)
+    topk = st.slider("How many to rank", 1, maxk, min(10, maxk)) if maxk > 1 else maxk
     if st.button("Rank candidates", type="primary"):
         rows = rank_for_display(records, topk)
         st.dataframe(rows, use_container_width=True, hide_index=True)
